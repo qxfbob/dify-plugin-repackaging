@@ -86,14 +86,10 @@ jobs:
           ./plugin_repackaging.sh \
           -p ${{ env.PIP_PLATFORM }} \
           -s ${{ env.PACKAGE_SUFFIX }} \
-          --find-links ${{ env.WHEELHOUSE_DIR }} \
           market \
-          "${{ github.event.inputs.plugin_author }}" \
-          "${{ github.event.inputs.plugin_name }}" \
-          "${{ github.event.inputs.plugin_version }}"
-        env:
-          PIP_PLATFORM: ${{ env.PIP_PLATFORM }}
-          WHEELHOUSE_DIR: ${{ env.WHEELHOUSE_DIR }}
+          "${{ inputs.plugin_author }}" \
+          "${{ inputs.plugin_name }}" \
+          "${{ inputs.plugin_version }}"
 
       - name: Find repackaged artifact
         run: |

@@ -323,28 +323,86 @@ PY
 
 	[ ! -f "requirements.txt" ] && echo "✗ Error: requirements.txt not found" && exit 1
 
-	# ============================================
-	# Step 3: Download Python dependencies as wheels
-	# ============================================
-	echo ""
-	echo "=========================================="
-	echo "Step 3: Downloading dependencies"
-	echo "=========================================="
-	echo "Index URL: ${PIP_MIRROR_URL}"
-	[ -n "$PIP_PLATFORM" ] && echo "Platform: ${RAW_PLATFORM}"
+  # ============================================
+  # Step 3: Download Python dependencies as wheels
+  # ============================================
+  echo ""
+  echo "=========================================="
+  echo "Step 3: Downloading dependencies"
+  echo "=========================================="
+  echo "Index URL: ${PIP_MIRROR_URL}"
+  [ -n "$PIP_PLATFORM" ] && echo "Platform: ${RAW_PLATFORM}"
+  mkdir -p ./wheels
+  echo "Downloading wheels to ./wheels/..."
 
-	mkdir -p ./wheels
-	echo "Downloading wheels to ./wheels/..."
-	${PIP_CMD} download ${PIP_PLATFORM} --prefer-binary -r requirements.txt -d ./wheels \
-		--index-url ${PIP_MIRROR_URL} --trusted-host mirrors.aliyun.com
-	if [[ $? -ne 0 ]]; then
-		echo "✗ Error: Failed to download dependencies"
-		exit 1
-	fi
+  # ---- 阶段 1: 批量下载 (大部分包能成功) ----
+  echo "Phase 1: Batch download with platform constraints..."
+  if [ -n "$PIP_PLATFORM" ]; then
+      BATCH_OK=0
+      ${PIP_CMD} download ${PIP_PLATFORM} --only-binary=:all: --prefer-binary \
+          -r requirements.txt -d ./wheels \
+          --index-url ${PIP_MIRROR_URL} --trusted-host mirrors.aliyun.com 2>&1 && BATCH_OK=1
 
-	# Count downloaded wheels
-	WHEEL_COUNT=$(ls -1 ./wheels/*.whl 2>/dev/null | wc -l)
-	echo "✓ Downloaded $WHEEL_COUNT wheel packages"
+      if [ "$BATCH_OK" -ne 1 ]; then
+          echo ""
+          echo "⚠ Phase 1 failed, switching to per-package download..."
+
+          # ---- 阶段 2: 逐个下载 (处理纯 Python 包如 odfpy) ----
+          echo "Phase 2: Per-package download with fallback..."
+          FAILED_PKGS=""
+          SUCCESS_COUNT=0
+          FALLBACK_COUNT=0
+
+          while IFS= read -r line || [ -n "$line" ]; do
+              # 跳过注释、空行、pip 选项行
+              line=$(echo "$line" | sed 's/#.*//' | xargs)
+              [ -z "$line" ] && continue
+              [[ "$line" == --* ]] && continue
+
+              echo "  → ${line}"
+
+              # 尝试 1: 带平台约束 (要求 wheel)
+              if ${PIP_CMD} download ${PIP_PLATFORM} --only-binary=:all: --no-deps \
+                  --prefer-binary "$line" -d ./wheels \
+                  --index-url ${PIP_MIRROR_URL} --trusted-host mirrors.aliyun.com 2>/dev/null; then
+                  echo "    ✅ wheel (platform-matched)"
+                  SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              # 尝试 2: 不带平台约束 (允许 sdist, 适用于纯 Python 包如 odfpy)
+              elif ${PIP_CMD} download --no-deps --prefer-binary "$line" -d ./wheels \
+                  --index-url ${PIP_MIRROR_URL} --trusted-host mirrors.aliyun.com 2>/dev/null; then
+                  echo "    ⚠️  sdist fallback (pure-python package)"
+                  FALLBACK_COUNT=$((FALLBACK_COUNT + 1))
+              else
+                  echo "    ❌ FAILED"
+                  FAILED_PKGS="${FAILED_PKGS}\n    - ${line}"
+              fi
+          done < requirements.txt
+
+          echo ""
+          echo "  Phase 2 summary: ${SUCCESS_COUNT} wheels, ${FALLBACK_COUNT} sdist fallbacks"
+
+          if [ -n "$FAILED_PKGS" ]; then
+              echo ""
+              echo "✗ Error: Failed to download the following packages:"
+              echo -e "$FAILED_PKGS"
+              exit 1
+          fi
+      fi
+  else
+      # 没有指定平台,直接下载
+      ${PIP_CMD} download --prefer-binary -r requirements.txt -d ./wheels \
+          --index-url ${PIP_MIRROR_URL} --trusted-host mirrors.aliyun.com
+      if [[ $? -ne 0 ]]; then
+          echo "✗ Error: Failed to download dependencies"
+          exit 1
+      fi
+  fi
+
+  # Count downloaded packages
+  WHEEL_COUNT=$(ls -1 ./wheels/*.whl 2>/dev/null | wc -l)
+  SDIST_COUNT=$(ls -1 ./wheels/*.tar.gz ./wheels/*.zip 2>/dev/null | wc -l)
+  echo "✓ Downloaded $WHEEL_COUNT wheel packages, $SDIST_COUNT source packages"
+
 
 	# ============================================
 	# Step 4: Update requirements.txt for offline usage
@@ -421,7 +479,6 @@ while getopts "p:s:R" opt; do
   case "$opt" in
     p)
       RAW_PLATFORM="${OPTARG}"
-      # 构建多平台参数（逗号分隔），去掉 --only-binary=:all:
       PIP_PLATFORM=""
       IFS=',' read -ra PLATFORMS <<< "$RAW_PLATFORM"
       for p in "${PLATFORMS[@]}"; do
@@ -434,6 +491,7 @@ while getopts "p:s:R" opt; do
     *) print_usage; exit 1 ;;
   esac
 done
+
 
 shift $((OPTIND - 1))
 

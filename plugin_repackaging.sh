@@ -421,11 +421,11 @@ while getopts "p:s:R" opt; do
   case "$opt" in
     p)
       RAW_PLATFORM="${OPTARG}"
-      # 修改这里：支持逗号分隔的多平台，构建多个 --platform 参数
-      PIP_PLATFORM="--only-binary=:all:"
+      # 构建多平台参数（逗号分隔），去掉 --only-binary=:all:
+      PIP_PLATFORM=""
       IFS=',' read -ra PLATFORMS <<< "$RAW_PLATFORM"
       for p in "${PLATFORMS[@]}"; do
-          p=$(echo "$p" | xargs) # 去除可能的首尾空格
+          p=$(echo "$p" | xargs)
           PIP_PLATFORM+=" --platform ${p}"
       done
       ;;

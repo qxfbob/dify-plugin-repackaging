@@ -235,7 +235,9 @@ PY
 	# Determine uv target platform to avoid cross-platform dependency conflicts
 	local UV_PLATFORM=""
 	if [[ -n "$RAW_PLATFORM" ]]; then
-		case "$RAW_PLATFORM" in
+    # 修改这里：取逗号前的第一个平台来判断操作系统类型
+		FIRST_PLATFORM=$(echo "$RAW_PLATFORM" | cut -d',' -f1)
+		case "$FIRST_PLATFORM" in
 			*linux*|*manylinux* )
 				UV_PLATFORM="linux"
 				echo "Target platform: Linux (cross-compilation from $OS_TYPE)"
@@ -416,12 +418,21 @@ print_usage() {
 }
 
 while getopts "p:s:R" opt; do
-	case "$opt" in
-		p) RAW_PLATFORM="${OPTARG}"; PIP_PLATFORM="--platform ${OPTARG} --only-binary=:all:" ;;
-		s) PACKAGE_SUFFIX="${OPTARG}" ;;
-		R) PRERELEASE_ALLOW=1 ;;
-		*) print_usage; exit 1 ;;
-	esac
+  case "$opt" in
+    p)
+      RAW_PLATFORM="${OPTARG}"
+      # 修改这里：支持逗号分隔的多平台，构建多个 --platform 参数
+      PIP_PLATFORM="--only-binary=:all:"
+      IFS=',' read -ra PLATFORMS <<< "$RAW_PLATFORM"
+      for p in "${PLATFORMS[@]}"; do
+          p=$(echo "$p" | xargs) # 去除可能的首尾空格
+          PIP_PLATFORM+=" --platform ${p}"
+      done
+      ;;
+    s) PACKAGE_SUFFIX="${OPTARG}" ;;
+    R) PRERELEASE_ALLOW=1 ;;
+    *) print_usage; exit 1 ;;
+  esac
 done
 
 shift $((OPTIND - 1))

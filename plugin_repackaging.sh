@@ -421,7 +421,7 @@ inject_uv_into_pyproject() {
   SDIST_COUNT=$(ls -1 ./wheels/*.tar.gz ./wheels/*.zip 2>/dev/null | wc -l)
   echo "✓ Downloaded $WHEEL_COUNT wheel packages, $SDIST_COUNT source packages"
 
-    # ============================================
+   # ============================================
   # Step 3.1: Verify downloaded dependencies
   # ============================================
   echo ""
@@ -429,12 +429,25 @@ inject_uv_into_pyproject() {
   echo "Step 3.1: Verifying downloaded dependencies"
   echo "=========================================="
   
+  # 从 RAW_PLATFORM 推导 uv 验证用的平台
+  UV_VERIFY_PLATFORM=""
+  if [ -n "$RAW_PLATFORM" ]; then
+      if echo "$RAW_PLATFORM" | grep -qi 'aarch64\|arm64'; then
+          UV_VERIFY_PLATFORM="linux-aarch64"
+      elif echo "$RAW_PLATFORM" | grep -qi 'x86_64\|x64\|amd64'; then
+          UV_VERIFY_PLATFORM="linux-x86_64"
+      fi
+  fi
+  
   VERIFY_OK=0
   
-  # 优先用 uv 验证 (加 --system 跳过虚拟环境要求)
+  # 优先用 uv 验证 (加 --system 和 --python-platform)
   if command -v uv &> /dev/null; then
       echo "Verifying with uv..."
-      if uv pip install --system --no-index --find-links ./wheels -r "$REQ_FILE" --dry-run 2>uv_verify_error.log; then
+      [ -n "$UV_VERIFY_PLATFORM" ] && echo "Target platform: ${UV_VERIFY_PLATFORM}"
+      if uv pip install --system \
+          ${UV_VERIFY_PLATFORM:+--python-platform ${UV_VERIFY_PLATFORM}} \
+          --no-index --find-links ./wheels -r "$REQ_FILE" --dry-run 2>uv_verify_error.log; then
           echo "✓ All dependencies verified by uv."
           VERIFY_OK=1
       else
@@ -443,7 +456,7 @@ inject_uv_into_pyproject() {
       fi
   fi
   
-  # uv 不可用时，用文件检查验证
+  # uv 不可用或失败时，用文件检查验证
   if [ "$VERIFY_OK" -eq 0 ]; then
       echo "Falling back to pip file-check verification..."
       MISSING_PKGS=""
@@ -452,13 +465,13 @@ inject_uv_into_pyproject() {
           [ -z "$line" ] && continue
           [[ "$line" == --* ]] && continue
           
-          # 跳过 Windows 专用包 (markers 含 win32)
-          if echo "$line" | grep -qi 'sys_platform.*win32\|platform_python_implementation.*win'; then
+          # 跳过 Windows 专用包
+          if echo "$line" | grep -qi 'sys_platform.*win32'; then
               echo "  ⊘ Skipping (Windows-only): ${line}"
               continue
           fi
           
-          # 提取包名
+          # 提取包名 (去掉版本号、extras、markers)
           PKG_NAME=$(echo "$line" | sed 's/\[.*\]//' | sed 's/[<>=!~].*//' | sed 's/;.*//' | xargs | tr '[:upper:]' '[:lower:]')
           [ -z "$PKG_NAME" ] && continue
           PKG_PATTERN=$(echo "$PKG_NAME" | tr '-' '_')
@@ -477,8 +490,6 @@ inject_uv_into_pyproject() {
           VERIFY_OK=1
       fi
   fi
-
-
 
   # ============================================
   # Step 4: Packaging plugin

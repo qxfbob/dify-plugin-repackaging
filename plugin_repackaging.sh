@@ -564,6 +564,11 @@ PY
     echo "Final jiter line before pip download:"
     grep -n "jiter" requirements.txt || true
 
+if grep -q "odfpy" requirements.txt; then
+    echo "Special handling for odfpy (pure Python package)..."
+    ${PIP_CMD} download odfpy==1.4.1 --no-deps -d ./wheels
+fi
+
     ${PIP_CMD} download ${PIP_PLATFORM} \
         --prefer-binary \
         -r requirements.txt \

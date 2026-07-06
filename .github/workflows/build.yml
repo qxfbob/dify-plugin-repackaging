@@ -7,45 +7,44 @@ on:
         description: "plugin author"
         required: true
         type: string
+        default: "langgenius"
+
       plugin_name:
         description: "plugin name"
         required: true
         type: string
+        default: "openai_api_compatible"
+
       plugin_version:
         description: "plugin version"
         required: true
         type: string
-      platform_arm:
-        description: "Use ARM platform (true = manylinux_2_28_aarch64, false = manylinux_2_17_x86_64)"
+        default: "0.0.53"
+
+      pip_platform:
+        description: "pip platform args"
         required: true
-        default: "false"
+        type: string
+        default: "manylinux_2_28_aarch64 --platform manylinux_2_17_aarch64 --platform manylinux2014_aarch64"
+
+      package_suffix:
+        description: "artifact suffix"
+        required: true
+        type: string
+        default: "offline-arm"
 
 jobs:
   repackage:
     runs-on: ubuntu-latest
+
     steps:
       - name: Print workflow inputs
         run: |
           echo "plugin_author  = ${{ inputs.plugin_author }}"
           echo "plugin_name    = ${{ inputs.plugin_name }}"
           echo "plugin_version = ${{ inputs.plugin_version }}"
-          echo "platform_arm   = ${{ inputs.platform_arm }}"
-
-      - name: Upgrade pip and setuptools
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-
-      - name: Resolve platform
-        run: |
-          if [ "${{ inputs.platform_arm }}" = "true" ]; then
-            # ARM: 主平台 manylinux2014 + 回退 manylinux_2_28
-            echo "PIP_PLATFORM=manylinux2014_aarch64,manylinux_2_28_aarch64" >> "$GITHUB_ENV"
-            echo "PACKAGE_SUFFIX=offline-arm" >> "$GITHUB_ENV"
-          else
-            # x86: 主平台 manylinux2014 + 回退 manylinux_2_28
-            echo "PIP_PLATFORM=manylinux2014_x86_64,manylinux_2_28_x86_64" >> "$GITHUB_ENV"
-            echo "PACKAGE_SUFFIX=offline" >> "$GITHUB_ENV"
-          fi
+          echo "pip_platform   = ${{ inputs.pip_platform }}"
+          echo "package_suffix = ${{ inputs.package_suffix }}"
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -55,27 +54,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build manylinux compatible wheels (Optional but recommended)
+      - name: Install tools
         run: |
-          # 创建一个临时目录用于存放处理后的 wheel
-          mkdir -p wheelhouse
-          # 尝试使用 manylinux2014 容器构建更兼容的 wheel
-          # 注意：此步骤可能需要根据你的实际依赖进行调整
-          # 如果失败，可以跳过此步骤，直接使用方案一和二
-          docker run --rm -v $(pwd):/workspace -w /workspace quay.io/pypa/manylinux2014_x86_64 \
-            bash -c "
-              # 安装构建依赖
-              yum install -y wget || true
-              # 尝试下载依赖
-              pip download --dest wheelhouse -r requirements.txt 2>/dev/null || echo 'No requirements.txt found, skipping wheel building.'
-              # 使用 auditwheel 修复 wheel
-              for wheel in wheelhouse/*.whl; do
-                if [[ \"\$wheel\" == *manylinux* ]]; then
-                  auditwheel repair \"\$wheel\" --plat ${{ env.PIP_PLATFORM }} -w wheelhouse/ || echo \"Failed to repair \$wheel\"
-                fi
-              done
-            " || echo "Docker run failed, continuing with default behavior."
-          echo "WHEELHOUSE_DIR=$(pwd)/wheelhouse" >> $GITHUB_ENV
+          python -m pip install --upgrade pip
+          python -m pip install uv
+          sudo apt-get update
+          sudo apt-get install -y unzip
 
       - name: Make plugin_repackaging.sh executable
         run: chmod +x ./plugin_repackaging.sh
@@ -84,8 +68,8 @@ jobs:
         run: |
           PIP_MIRROR_URL=https://pypi.org/simple \
           ./plugin_repackaging.sh \
-          -p ${{ env.PIP_PLATFORM }} \
-          -s ${{ env.PACKAGE_SUFFIX }} \
+          -p "${{ inputs.pip_platform }}" \
+          -s "${{ inputs.package_suffix }}" \
           market \
           "${{ inputs.plugin_author }}" \
           "${{ inputs.plugin_name }}" \
@@ -93,14 +77,17 @@ jobs:
 
       - name: Find repackaged artifact
         run: |
-          ARTIFACT_PATH=$(find . -type f -name "*-${PACKAGE_SUFFIX}.difypkg" | head -n 1)
+          ARTIFACT_PATH=$(find . -type f -name "*-${{ inputs.package_suffix }}.difypkg" | head -n 1)
+
           if [ -z "$ARTIFACT_PATH" ]; then
-            echo "No *-${PACKAGE_SUFFIX}.difypkg artifact found!"
+            echo "No *-${{ inputs.package_suffix }}.difypkg artifact found!"
+            echo "Current directory files:"
+            find . -maxdepth 3 -type f
             exit 1
           fi
-      
-          echo "ARTIFACT_PATH=$ARTIFACT_PATH" >> $GITHUB_ENV
-          echo "ARTIFACT_NAME=$(basename "$ARTIFACT_PATH")" >> $GITHUB_ENV
+
+          echo "ARTIFACT_PATH=$ARTIFACT_PATH" >> "$GITHUB_ENV"
+          echo "ARTIFACT_NAME=$(basename "$ARTIFACT_PATH")" >> "$GITHUB_ENV"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -339,7 +339,7 @@ PY
           echo "✓ Full requirements resolved: $REQ_FILE"
           # 显示传递依赖示例
           echo "  Sample transitive dependencies:"
-          grep -E "^(tqdm|werkzeug|colorama)" "$REQ_FILE" | head -3 | sed 's/^/    - /'
+          grep -E "^(anyio|tqdm|werkzeug|colorama)" "$REQ_FILE" | head -5 | sed 's/^/    - /'
       else
           echo "⚠ Failed to resolve full requirements, falling back to original."
       fi

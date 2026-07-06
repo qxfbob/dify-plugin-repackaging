@@ -664,42 +664,16 @@ print_usage() {
 while getopts "p:s:R" opt; do
     case "$opt" in
         p)
-    RAW_PLATFORM="${OPTARG}"
-    # 添加Python版本信息（当前使用Python 3.12）
-    PY_VER="3.12"
-    # 检查输入中是否已经包含--python-version
-    if [[ "${OPTARG}" == *"--python-version"* ]]; then
-        # 如果已经包含，则直接使用输入
-        if [[ "${OPTARG}" == --platform* ]]; then
-            PIP_PLATFORM="${OPTARG} --only-binary=:all:"
-        elif [[ "${OPTARG}" == *"aarch64"* && "${OPTARG}" != *"--platform"* ]]; then
-            PIP_PLATFORM="--platform ${OPTARG} --platform manylinux_2_17_aarch64 --platform manylinux2014_aarch64 --only-binary=:all:"
-        else
-            PIP_PLATFORM="--platform ${OPTARG} --only-binary=:all:"
-        fi
-    else
-        # 如果不包含，则添加Python版本信息
-        if [[ "${OPTARG}" == --platform* ]]; then
-            PIP_PLATFORM="${OPTARG} --only-binary=:all: \
-                --python-version ${PY_VER} \
-                --implementation cp \
-                --abi cp${PY_VER/./}"
-        elif [[ "${OPTARG}" == *"aarch64"* && "${OPTARG}" != *"--platform"* ]]; then
-            PIP_PLATFORM="--platform ${OPTARG} \
-                --platform manylinux_2_17_aarch64 \
-                --platform manylinux2014_aarch64 \
-                --only-binary=:all: \
-                --python-version ${PY_VER} \
-                --implementation cp \
-                --abi cp${PY_VER/./}"
-        else
-            PIP_PLATFORM="--platform ${OPTARG} --only-binary=:all: \
-                --python-version ${PY_VER} \
-                --implementation cp \
-                --abi cp${PY_VER/./}"
-        fi
-    fi
-    ;;
+            RAW_PLATFORM="${OPTARG}"
+
+            if [[ "${OPTARG}" == --platform* ]]; then
+                PIP_PLATFORM="${OPTARG} --only-binary=:all:"
+            elif [[ "${OPTARG}" == *"aarch64"* && "${OPTARG}" != *"--platform"* ]]; then
+                PIP_PLATFORM="--platform ${OPTARG} --platform manylinux_2_17_aarch64 --platform manylinux2014_aarch64 --only-binary=:all:"
+            else
+                PIP_PLATFORM="--platform ${OPTARG} --only-binary=:all:"
+            fi
+            ;;
         s)
             PACKAGE_SUFFIX="${OPTARG}"
             ;;

@@ -322,7 +322,25 @@ PY
 	fi
 
 	[ ! -f "requirements.txt" ] && echo "✗ Error: requirements.txt not found" && exit 1
-
+  # ============================================================
+  # 关键新增：解析出包含所有传递依赖的完整列表
+  # ============================================================
+  REQ_FILE="requirements.txt"
+  if command -v uv &> /dev/null; then
+      echo "Resolving all transitive dependencies (e.g. werkzeug)..."
+      # 使用 uv pip compile 将简写的 requirements.txt 解析为包含所有间接依赖的完整列表
+      uv pip compile requirements.txt -o _full_requirements.txt \
+          ${UV_PLATFORM:+--python-platform${UV_PLATFORM}} \
+          --python-version "${UV_PY_VERSION}"${UV_PRERELEASE_FLAG} 2>/dev/null || cp requirements.txt _full_requirements.txt
+      
+      # 如果生成成功且非空，则使用它
+      if [ -s "_full_requirements.txt" ]; then
+          REQ_FILE="_full_requirements.txt"
+          echo "✓ Full requirements resolved: $REQ_FILE"
+      else
+          echo "⚠ Failed to resolve full requirements, falling back to original."
+      fi
+  fi
   # ============================================
   # Step 3: Download Python dependencies as wheels
   # ============================================
@@ -339,8 +357,8 @@ PY
   echo "Phase 1: Batch download with platform constraints..."
   if [ -n "$PIP_PLATFORM" ]; then
       BATCH_OK=0
-      ${PIP_CMD} download ${PIP_PLATFORM} --only-binary=:all: --prefer-binary \
-          -r requirements.txt -d ./wheels \
+      ${PIP_CMD} download${PIP_PLATFORM} --only-binary=:all: --prefer-binary \
+          -r "$REQ_FILE" -d ./wheels \
           --index-url ${PIP_MIRROR_URL} --trusted-host mirrors.aliyun.com 2>&1 && BATCH_OK=1
 
       if [ "$BATCH_OK" -ne 1 ]; then
@@ -362,24 +380,24 @@ PY
               echo "  → ${line}"
 
               # 尝试 1: 带平台约束 (要求 wheel)
-              if ${PIP_CMD} download ${PIP_PLATFORM} --only-binary=:all: --no-deps \
+              if ${PIP_CMD} download${PIP_PLATFORM} --only-binary=:all: --no-deps \
                   --prefer-binary "$line" -d ./wheels \
                   --index-url ${PIP_MIRROR_URL} --trusted-host mirrors.aliyun.com 2>/dev/null; then
                   echo "    ✅ wheel (platform-matched)"
                   SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-              # 尝试 2: 不带平台约束 (允许 sdist, 适用于纯 Python 包如 odfpy)
+              # 尝试 2: 不带平台约束 (允许 sdist, 适用于纯 Python 包)
               elif ${PIP_CMD} download --no-deps --prefer-binary "$line" -d ./wheels \
                   --index-url ${PIP_MIRROR_URL} --trusted-host mirrors.aliyun.com 2>/dev/null; then
                   echo "    ⚠️  sdist fallback (pure-python package)"
                   FALLBACK_COUNT=$((FALLBACK_COUNT + 1))
               else
                   echo "    ❌ FAILED"
-                  FAILED_PKGS="${FAILED_PKGS}\n    - ${line}"
+                  FAILED_PKGS="${FAILED_PKGS}\n    -${line}"
               fi
-          done < requirements.txt
+          done < "$REQ_FILE"
 
           echo ""
-          echo "  Phase 2 summary: ${SUCCESS_COUNT} wheels, ${FALLBACK_COUNT} sdist fallbacks"
+          echo "  Phase 2 summary: ${SUCCESS_COUNT} wheels,${FALLBACK_COUNT} sdist fallbacks"
 
           if [ -n "$FAILED_PKGS" ]; then
               echo ""
@@ -390,7 +408,7 @@ PY
       fi
   else
       # 没有指定平台,直接下载
-      ${PIP_CMD} download --prefer-binary -r requirements.txt -d ./wheels \
+      ${PIP_CMD} download --prefer-binary -r "$REQ_FILE" -d ./wheels \
           --index-url ${PIP_MIRROR_URL} --trusted-host mirrors.aliyun.com
       if [[ $? -ne 0 ]]; then
           echo "✗ Error: Failed to download dependencies"
@@ -401,7 +419,7 @@ PY
   # Count downloaded packages
   WHEEL_COUNT=$(ls -1 ./wheels/*.whl 2>/dev/null | wc -l)
   SDIST_COUNT=$(ls -1 ./wheels/*.tar.gz ./wheels/*.zip 2>/dev/null | wc -l)
-  echo "✓ Downloaded $WHEEL_COUNT wheel packages, $SDIST_COUNT source packages"
+  echo "✓ Downloaded $WHEEL_COUNT wheel packages,$SDIST_COUNT source packages"
 
 
 	# ============================================

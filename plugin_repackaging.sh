@@ -665,15 +665,29 @@ while getopts "p:s:R" opt; do
     case "$opt" in
         p)
             RAW_PLATFORM="${OPTARG}"
-
+            # 当前 GitHub Actions 使用的是 Python 3.12
+            PY_VER="3.12"
             if [[ "${OPTARG}" == --platform* ]]; then
-                PIP_PLATFORM="${OPTARG} --only-binary=:all:"
+                PIP_PLATFORM="${OPTARG} --only-binary=:all: \
+                    --python-version ${PY_VER} \
+                    --implementation cp \
+                    --abi cp${PY_VER/./}"
             elif [[ "${OPTARG}" == *"aarch64"* && "${OPTARG}" != *"--platform"* ]]; then
-                PIP_PLATFORM="--platform ${OPTARG} --platform manylinux_2_17_aarch64 --platform manylinux2014_aarch64 --only-binary=:all:"
+                PIP_PLATFORM="--platform ${OPTARG} \
+                    --platform manylinux_2_17_aarch64 \
+                    --platform manylinux2014_aarch64 \
+                    --only-binary=:all: \
+                    --python-version ${PY_VER} \
+                    --implementation cp \
+                    --abi cp${PY_VER/./}"
             else
-                PIP_PLATFORM="--platform ${OPTARG} --only-binary=:all:"
+                PIP_PLATFORM="--platform ${OPTARG} --only-binary=:all: \
+                    --python-version ${PY_VER} \
+                    --implementation cp \
+                    --abi cp${PY_VER/./}"
             fi
             ;;
+
         s)
             PACKAGE_SUFFIX="${OPTARG}"
             ;;

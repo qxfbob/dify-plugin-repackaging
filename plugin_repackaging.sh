@@ -187,92 +187,78 @@ inject_uv_into_pyproject() {
 	fi
 	echo "✓ Using pip: ${PIP_CMD}"
 
-	# ============================================
-	# Step 1: Detect Python and platform configuration
-	# ============================================
-	echo ""
-	echo "=========================================="
-	echo "Step 1: Detecting Python and platform"
-	echo "=========================================="
-
-	# Detect Python version
-	PYTHON_CMD_FOR_UV="python3"
-	PY_VERSION_FULL=$(python3 --version 2>&1 | awk '{print $2}')
-	PY_MAJOR=$(echo $PY_VERSION_FULL | cut -d. -f1)
-	PY_MINOR=$(echo $PY_VERSION_FULL | cut -d. -f2)
-	PYTHON_VERSION=$PY_VERSION_FULL
-
-	echo "Detected Python: $PYTHON_VERSION"
-
-	# If Python is 3.14+, try to use 3.12 or 3.13 for better compatibility
-	if [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -ge 14 ]; then
-		echo "⚠ Warning: Python $PYTHON_VERSION is too new for some packages"
-		if command -v python3.12 &> /dev/null; then
-			PYTHON_CMD_FOR_UV="python3.12"
-			PYTHON_VERSION=$($PYTHON_CMD_FOR_UV --version 2>&1 | awk '{print $2}')
-			echo "✓ Switched to python3.12 ($PYTHON_VERSION) for better compatibility"
-		elif command -v python3.13 &> /dev/null; then
-			PYTHON_CMD_FOR_UV="python3.13"
-			PYTHON_VERSION=$($PYTHON_CMD_FOR_UV --version 2>&1 | awk '{print $2}')
-			echo "✓ Switched to python3.13 ($PYTHON_VERSION) for better compatibility"
-		else
-			echo "⚠ Warning: No compatible Python version found, proceeding with $PYTHON_VERSION"
-		fi
-	else
-		echo "✓ Python version $PYTHON_VERSION is compatible"
-	fi
-
-	# Extract Python major.minor for uv
-	UV_PY_VERSION=$($PYTHON_CMD_FOR_UV - <<'PY'
-import sys
-print(f"{sys.version_info.major}.{sys.version_info.minor}")
-PY
-)
-
-	# Determine uv target platform to avoid cross-platform dependency conflicts
-	local UV_PLATFORM=""
-	if [[ -n "$RAW_PLATFORM" ]]; then
-    # 修改这里：取逗号前的第一个平台来判断操作系统类型
-		FIRST_PLATFORM=$(echo "$RAW_PLATFORM" | cut -d',' -f1)
-		case "$FIRST_PLATFORM" in
-			*linux*|*manylinux* )
-				UV_PLATFORM="linux"
-				echo "Target platform: Linux (cross-compilation from $OS_TYPE)"
-				;;
-			*macos*|*darwin* )
-				UV_PLATFORM="macos"
-				echo "Target platform: macOS (cross-compilation from $OS_TYPE)"
-				;;
-			*win* )
-				UV_PLATFORM="windows"
-				echo "Target platform: Windows (cross-compilation from $OS_TYPE)"
-				;;
-			* )
-				UV_PLATFORM=""
-				echo "Target platform: current ($OS_TYPE)"
-				;;
-		esac
-	else
-		if [[ "$OS_TYPE" == "darwin" ]]; then
-			UV_PLATFORM="macos"
-		elif [[ "$OS_TYPE" == "linux" ]]; then
-			UV_PLATFORM="linux"
-		elif [[ "$OS_TYPE" == "windows" ]]; then
-			UV_PLATFORM="windows"
-		fi
-		echo "Target platform: $UV_PLATFORM (current system)"
-	fi
-
-	# Set prerelease flag
-	UV_PRERELEASE_FLAG=""
-	if [[ "$PRERELEASE_ALLOW" -eq 1 ]]; then
-		UV_PRERELEASE_FLAG="--prerelease=allow"
-		echo "Prerelease versions: allowed"
-	else
-		echo "Prerelease versions: disallowed"
-	fi
-
-	echo "✓ Configuration: platform=${UV_PLATFORM:-current}, python=$UV_PY_VERSION"
+  # ============================================
+  # Step 1: Detect Python and platform
+  # ============================================
+  echo ""
+  echo "=========================================="
+  echo "Step 1: Detecting Python and platform"
+  echo "=========================================="
+  
+  # 检测Python版本，如果不是3.12则尝试切换
+  PYTHON_CMD_FOR_UV="python3"
+  PY_VERSION_FULL=$(python3 --version 2>&1 | awk '{print $2}')
+  PY_MAJOR=$(echo $PY_VERSION_FULL | cut -d. -f1)
+  PY_MINOR=$(echo $PY_VERSION_FULL | cut -d. -f2)
+  PYTHON_VERSION=$PY_VERSION_FULL
+  
+  echo "Detected Python: $PYTHON_VERSION"
+  
+  # 如果Python不是3.12，尝试使用3.12
+  if [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -ne 12 ]; then
+      if command -v python3.12 &> /dev/null; then
+          PYTHON_CMD_FOR_UV="python3.12"
+          PYTHON_VERSION=$($PYTHON_CMD_FOR_UV --version 2>&1 | awk '{print $2}')
+          echo "✓ Switched to python3.12 ($PYTHON_VERSION) for compatibility"
+      else
+          echo "⚠ Warning: Python 3.12 not found, using $PYTHON_VERSION"
+      fi
+  else
+      echo "✓ Python version $PYTHON_VERSION is compatible"
+  fi
+  
+  # 设置uv目标平台
+  local UV_PLATFORM=""
+  if [[ -n "$RAW_PLATFORM" ]]; then
+      case "$RAW_PLATFORM" in
+          *linux*|*manylinux* )
+              UV_PLATFORM="linux"
+              echo "Target platform: Linux (cross-compilation from $OS_TYPE)"
+              ;;
+          *macos*|*darwin* )
+              UV_PLATFORM="macos"
+              echo "Target platform: macOS (cross-compilation from $OS_TYPE)"
+              ;;
+          *win* )
+              UV_PLATFORM="windows"
+              echo "Target platform: Windows (cross-compilation from $OS_TYPE)"
+              ;;
+          * )
+              UV_PLATFORM=""
+              echo "Target platform: current ($OS_TYPE)"
+              ;;
+      esac
+  else
+      if [[ "$OS_TYPE" == "darwin" ]]; then
+          UV_PLATFORM="macos"
+      elif [[ "$OS_TYPE" == "linux" ]]; then
+          UV_PLATFORM="linux"
+      elif [[ "$OS_TYPE" == "windows" ]]; then
+          UV_PLATFORM="windows"
+      fi
+      echo "Target platform: $UV_PLATFORM (current system)"
+  fi
+  
+  # 设置prerelease标志
+  UV_PRERELEASE_FLAG=""
+  if [[ "$PRERELEASE_ALLOW" -eq 1 ]]; then
+      UV_PRERELEASE_FLAG="--prerelease=allow"
+      echo "Prerelease versions: allowed"
+  else
+      echo "Prerelease versions: disallowed"
+  fi
+  
+  echo "✓ Configuration: platform=${UV_PLATFORM:-current}, python=$PYTHON_VERSION"
 
     # ============================================
   # Step 2: Processing dependencies
@@ -429,10 +415,10 @@ PY
   echo "=========================================="
   echo "Step 3.1: Verifying downloaded dependencies"
   echo "=========================================="
-  if [ -f "$REQ_FILE" ] && command -v uv &> /dev/null; then
+  if [ -f "pyproject.toml" ] && command -v uv &> /dev/null; then
       echo "Verifying dependencies with uv..."
       # 使用 uv pip install --dry-run 检查是否所有依赖都能在本地找到
-      if ! uv pip install --no-index --find-links ./wheels -r "$REQ_FILE" --dry-run 2>uv_verify_error.log; then
+      if ! uv pip install --no-index --find-links ./wheels -r pyproject.toml --dry-run 2>uv_verify_error.log; then
           echo "✗ Error: Some dependencies are missing in the local wheels directory."
           echo "Error details:"
           cat uv_verify_error.log
@@ -448,21 +434,37 @@ PY
       echo "⚠ uv not found, skipping verification. Please ensure all dependencies are downloaded."
   fi
 
-	# ============================================
-	# Step 4: Update requirements.txt for offline usage
-	# ============================================
-	echo ""
-	echo "Updating requirements.txt for offline installation..."
-	if [[ "linux" == "$OS_TYPE" ]]; then
-		sed -i '1i\--no-index --find-links=./wheels/' requirements.txt
-		[ -f ".difyignore" ] && IGNORE_PATH=.difyignore || IGNORE_PATH=.gitignore
-		[ -f "$IGNORE_PATH" ] && sed -i '/^wheels\//d' "${IGNORE_PATH}"
-	elif [[ "darwin" == "$OS_TYPE" ]]; then
-		sed -i ".bak" '1i\--no-index --find-links=./wheels/' requirements.txt && rm -f requirements.txt.bak
-		[ -f ".difyignore" ] && IGNORE_PATH=.difyignore || IGNORE_PATH=.gitignore
-		[ -f "$IGNORE_PATH" ] && sed -i ".bak" '/^wheels\//d' "${IGNORE_PATH}" && rm -f "${IGNORE_PATH}.bak"
-	fi
-	echo "✓ requirements.txt updated for offline mode"
+  # ============================================
+  # Step 4: Packaging plugin
+  # ============================================
+  echo ""
+  echo "=========================================="
+  echo "Step 4: Packaging plugin"
+  echo "=========================================="
+  cd ${CURR_DIR} || exit 1
+  chmod 755 ${CURR_DIR}/${CMD_NAME}
+  OUTPUT_PACKAGE="${CURR_DIR}/${PACKAGE_NAME}-${PACKAGE_SUFFIX}.difypkg"
+  echo "Packaging: ${PACKAGE_NAME}"
+  echo "Output: ${OUTPUT_PACKAGE}"
+  echo "Max size: 5120 MB"
+  
+  # 使用正确的Python版本执行打包命令
+  ${PYTHON_CMD_FOR_UV} -m dify_plugin plugin package${CURR_DIR}/${PACKAGE_NAME} \
+      -o ${OUTPUT_PACKAGE} --max-size 5120
+  if [[ $? -ne 0 ]]; then
+      echo "✗ Error: Packaging failed"
+      exit 1
+  fi
+  
+  # 获取文件大小
+  FILE_SIZE=$(du -h "${OUTPUT_PACKAGE}" | cut -f1)
+  echo ""
+  echo "=========================================="
+  echo "✓ Package created successfully!"
+  echo "=========================================="
+  echo "Location: ${OUTPUT_PACKAGE}"
+  echo "Size: ${FILE_SIZE}"
+  echo "Platform: ${RAW_PLATFORM:-current}"
 
 	# ============================================
 	# Step 5: Package the plugin

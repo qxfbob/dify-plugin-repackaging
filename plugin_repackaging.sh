@@ -557,26 +557,43 @@ PY
         echo "Platform args: current platform"
     fi
 
-    mkdir -p ./wheels
-    echo "Downloading wheels to ./wheels/..."
+mkdir -p ./wheels
+echo "Downloading wheels to ./wheels/..."
 
-    echo ""
-    echo "Final jiter line before pip download:"
-    grep -n "jiter" requirements.txt || true
+echo "Final jiter line before pip download:"
+grep -n "jiter" requirements.txt || true
 
-if grep -q "odfpy" requirements.txt; then
-    echo "Special handling for odfpy (pure Python package)..."
-    ${PIP_CMD} download odfpy==1.4.1 --no-deps -d ./wheels
-fi
+# ==========================================
+# 新增：手动预处理纯 Python 依赖
+# ==========================================
+echo "Pre-downloading pure-python packages that often fail cross-platform resolution..."
+# 将所有可能导致 "from versions: none" 的纯 Python 包写在这里
+PURE_PY_PACKAGES=("odfpy>=1.4.1" "et-xmlfile" "tabulate" "pyxlsb")
 
-    ${PIP_CMD} download ${PIP_PLATFORM} \
-        --prefer-binary \
-        -r requirements.txt \
+for pkg in "${PURE_PY_PACKAGES[@]}"; do
+    echo "  -> Pre-downloading $pkg (no platform restrictions)..."
+    # 使用 --no-deps 确保只下载这个包本身，不解析它的依赖树
+    ${PIP_CMD} download --no-deps \
+        "$pkg" \
         -d ./wheels \
         --index-url "${PIP_MIRROR_URL}" \
         --trusted-host mirrors.aliyun.com \
         --trusted-host pypi.org \
-        --trusted-host files.pythonhosted.org
+        --trusted-host files.pythonhosted.org || echo "  -> $pkg might not be needed or already exists."
+done
+# ==========================================
+
+# 执行主依赖下载，关键在于加上 --find-links=./wheels
+${PIP_CMD} download ${PIP_PLATFORM} \
+    --prefer-binary \
+    --find-links=./wheels \
+    -r requirements.txt \
+    -d ./wheels \
+    --index-url "${PIP_MIRROR_URL}" \
+    --trusted-host mirrors.aliyun.com \
+    --trusted-host pypi.org \
+    --trusted-host files.pythonhosted.org
+
 
     if [[ $? -ne 0 ]]; then
         echo "✗ Error: Failed to download dependencies"

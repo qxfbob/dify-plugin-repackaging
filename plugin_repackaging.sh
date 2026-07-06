@@ -152,31 +152,28 @@ repackage(){
 	fi
 
 	# Inject [tool.uv] config into pyproject.toml (runtime will use local wheels offline)
-	inject_uv_into_pyproject() {
-		local PYFILE="$1"
-		[ -f "$PYFILE" ] || return 0
-	awk '
-		BEGIN { in_uv=0; saw_uv=0; saw_no=0; saw_find=0; saw_pre=0 }
-		function print_missing(){ if (!saw_no) print "no-index = true"; if (!saw_find) print "find-links = [\"./wheels\"]"; if (!saw_pre) print "prerelease = \"allow\"" }
-		/^[ \t]*\[tool\.uv\][ \t]*$/ { saw_uv=1; in_uv=1; saw_no=0; saw_find=0; saw_pre=0; print; next }
-		{ if (in_uv && $0 ~ /^[ \t]*\[/) { print_missing(); in_uv=0 } }
-		{ if (in_uv && $0 ~ /^[ \t]*no-index[ \t]*=/) { print "no-index = true"; saw_no=1; next } }
-		{ if (in_uv && $0 ~ /^[ \t]*find-links[ \t]*=/) { print "find-links = [\"./wheels\"]"; saw_find=1; next } }
-		{ if (in_uv && $0 ~ /^[ \t]*prerelease[ \t]*=/) { print "prerelease = \"allow\""; saw_pre=1; next } }
-		{ print }
-		END {
-			if (in_uv) { print_missing() }
-			if (!saw_uv) {
-				print ""
-				print "[tool.uv]"
-				print "no-index = true"
-				print "find-links = [\"./wheels\"]"
-				print "prerelease = \"allow\""
-			}
-		}
-		' "$PYFILE" > "$PYFILE.tmp" && mv "$PYFILE.tmp" "$PYFILE"
-		echo "Injected [tool.uv] into $PYFILE"
-	}
+inject_uv_into_pyproject() {
+    local PYFILE="$1"
+    [ -f "$PYFILE" ] || return 0
+    awk '
+    BEGIN { in_uv=0; saw_uv=0; saw_no=0; saw_find=0; saw_pre=0; saw_env=0 }
+    function print_missing(){
+      if (!saw_no) print "no-index = true";
+      if (!saw_find) print "find-links = [\"./wheels\"]";
+      if (!saw_pre) print "prerelease = \"allow\"";
+      if (!saw_env) print "environments = [\"sys_platform == \\\"linux\\\"\"]";
+    }
+    /^[ \t]*\[tool\.uv\][ \t]*$/ { saw_uv=1; in_uv=1; saw_no=0; saw_find=0; saw_pre=0; saw_env=0; print; next }
+    { if (in_uv && $0 ~ /^[ \t]*\[/) { print_missing(); in_uv=0 } }
+    { if (in_uv && $0 ~ /^[ \t]*no-index[ \t]*=/) { print "no-index = true"; saw_no=1; next } }
+    { if (in_uv && $0 ~ /^[ \t]*find-links[ \t]*=/) { print "find-links = [\"./wheels\"]"; saw_find=1; next } }
+    { if (in_uv && $0 ~ /^[ \t]*prerelease[ \t]*=/) { print "prerelease = \"allow\""; saw_pre=1; next } }
+    { if (in_uv && $0 ~ /^[ \t]*environments[ \t]*=/) { print "environments = [\"sys_platform == \\\"linux\\\"\"]"; saw_env=1; next } }
+    { print }
+    END { if (in_uv) { print_missing() } if (!saw_uv) { print "" print "[tool.uv]" print "no-index = true" print "find-links = [\"./wheels\"]" print "prerelease = \"allow\"" print "environments = [\"sys_platform == \\\"linux\\\"\"]" } }
+    ' "$PYFILE" > "$PYFILE.tmp" && mv "$PYFILE.tmp" "$PYFILE"
+    echo "Injected [tool.uv] into $PYFILE"
+}
 
 	if python3 -m pip --version &> /dev/null 2>&1; then
 		PIP_CMD="python3 -m pip"
@@ -277,7 +274,7 @@ PY
 
 	echo "✓ Configuration: platform=${UV_PLATFORM:-current}, python=$UV_PY_VERSION"
 
-  # ============================================
+    # ============================================
   # Step 2: Processing dependencies
   # ============================================
   echo ""
@@ -327,7 +324,7 @@ PY
   # ============================================================
   REQ_FILE="requirements.txt"
   if command -v uv &> /dev/null; then
-      echo "Resolving all transitive dependencies (e.g. tqdm, werkzeug)..."
+      echo "Resolving all transitive dependencies (e.g. anyio, tqdm, werkzeug)..."
       # 使用 uv pip compile 将简写的 requirements.txt 解析为包含所有间接依赖的完整列表
       uv pip compile requirements.txt -o _full_requirements.txt \
           ${UV_PLATFORM:+--python-platform ${UV_PLATFORM}} \
@@ -345,7 +342,7 @@ PY
       fi
   fi
 
-    # ============================================
+   # ============================================
   # Step 3: Download Python dependencies as wheels
   # ============================================
   echo ""
@@ -369,7 +366,7 @@ PY
           echo ""
           echo "⚠ Phase 1 failed, switching to per-package download..."
 
-          # ---- 阶段 2: 逐个下载 (处理纯 Python 包如 odfpy, tqdm) ----
+          # ---- 阶段 2: 逐个下载 (处理纯 Python 包如 odfpy, anyio, tqdm) ----
           echo "Phase 2: Per-package download with fallback..."
           FAILED_PKGS=""
           SUCCESS_COUNT=0
@@ -424,6 +421,7 @@ PY
   WHEEL_COUNT=$(ls -1 ./wheels/*.whl 2>/dev/null | wc -l)
   SDIST_COUNT=$(ls -1 ./wheels/*.tar.gz ./wheels/*.zip 2>/dev/null | wc -l)
   echo "✓ Downloaded $WHEEL_COUNT wheel packages, $SDIST_COUNT source packages"
+
   # ============================================
   # Step 3.1: Verify downloaded dependencies
   # ============================================

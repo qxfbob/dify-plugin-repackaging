@@ -187,6 +187,19 @@ inject_uv_into_pyproject() {
 	fi
 	echo "✓ Using pip: ${PIP_CMD}"
 
+ # ============================================
+  # Step 0: Install uv
+  # ============================================
+  if ! command -v uv &> /dev/null; then
+      echo "Installing uv..."
+      pip install uv 2>/dev/null || pip3 install uv 2>/dev/null
+      if ! command -v uv &> /dev/null; then
+          curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null
+          export PATH="$HOME/.local/bin:$PATH"
+      fi
+  fi
+  command -v uv &> /dev/null && echo "✓ uv: $(uv --version)" || echo "⚠ uv not found"
+
   # ============================================
   # Step 1: Detect Python and platform
   # ============================================
@@ -415,24 +428,49 @@ inject_uv_into_pyproject() {
   echo "=========================================="
   echo "Step 3.1: Verifying downloaded dependencies"
   echo "=========================================="
-  if [ -f "pyproject.toml" ] && command -v uv &> /dev/null; then
-      echo "Verifying dependencies with uv..."
-      # 使用 uv pip install --dry-run 检查是否所有依赖都能在本地找到
-      if ! uv pip install --no-index --find-links ./wheels -r pyproject.toml --dry-run 2>uv_verify_error.log; then
-          echo "✗ Error: Some dependencies are missing in the local wheels directory."
-          echo "Error details:"
+  
+  VERIFY_OK=0
+  
+  # 优先用 uv 验证
+  if command -v uv &> /dev/null; then
+      echo "Verifying with uv..."
+      if uv pip install --no-index --find-links ./wheels -r "$REQ_FILE" --dry-run 2>uv_verify_error.log; then
+          echo "✓ All dependencies verified by uv."
+          VERIFY_OK=1
+      else
+          echo "⚠ uv verification failed:"
           cat uv_verify_error.log
-          # 从错误信息中提取缺失的包名
-          echo ""
-          echo "Missing packages:"
-          grep -oP 'package "([^"]+)" not found' uv_verify_error.log | awk -F\" '{print $2}' | sort -u
+      fi
+  fi
+  
+  # uv 不可用时，用 pip 逐个检查
+  if [ "$VERIFY_OK" -eq 0 ]; then
+      echo "Falling back to pip file-check verification..."
+      MISSING_PKGS=""
+      while IFS= read -r line || [ -n "$line" ]; do
+          line=$(echo "$line" | sed 's/#.*//' | xargs)
+          [ -z "$line" ] && continue
+          [[ "$line" == --* ]] && continue
+          
+          PKG_NAME=$(echo "$line" | sed 's/\[.*\]//' | sed 's/[<>=!~].*//' | xargs | tr '[:upper:]' '[:lower:]')
+          [ -z "$PKG_NAME" ] && continue
+          PKG_PATTERN=$(echo "$PKG_NAME" | tr '-' '_')
+          
+          if ! ls ./wheels/ 2>/dev/null | grep -iq "^${PKG_PATTERN}-.*\.\(whl\|tar\.gz\|zip\)"; then
+              MISSING_PKGS="${MISSING_PKGS}\n    - ${line}"
+          fi
+      done < "$REQ_FILE"
+      
+      if [ -n "$MISSING_PKGS" ]; then
+          echo "✗ Missing packages in ./wheels/:"
+          echo -e "$MISSING_PKGS"
           exit 1
       else
-          echo "✓ All dependencies are available locally."
+          echo "✓ All dependencies found in ./wheels/."
+          VERIFY_OK=1
       fi
-  else
-      echo "⚠ uv not found, skipping verification. Please ensure all dependencies are downloaded."
   fi
+
 
   # ============================================
   # Step 4: Packaging plugin
@@ -449,7 +487,7 @@ inject_uv_into_pyproject() {
   echo "Max size: 5120 MB"
   
   # 使用正确的Python版本执行打包命令
-  ${PYTHON_CMD_FOR_UV} -m dify_plugin plugin package${CURR_DIR}/${PACKAGE_NAME} \
+${CURR_DIR}/${CMD_NAME} plugin package ${CURR_DIR}/${PACKAGE_NAME} \
       -o ${OUTPUT_PACKAGE} --max-size 5120
   if [[ $? -ne 0 ]]; then
       echo "✗ Error: Packaging failed"

@@ -277,71 +277,75 @@ PY
 
 	echo "✓ Configuration: platform=${UV_PLATFORM:-current}, python=$UV_PY_VERSION"
 
-	# ============================================
-	# Step 2: Generate requirements.txt from pyproject.toml
-	# ============================================
-	echo ""
-	echo "=========================================="
-	echo "Step 2: Processing dependencies"
-	echo "=========================================="
+  # ============================================
+  # Step 2: Processing dependencies
+  # ============================================
+  echo ""
+  echo "=========================================="
+  echo "Step 2: Processing dependencies"
+  echo "=========================================="
+  
+  # Inject [tool.uv] config to enable offline wheel usage
+  if [ -f "pyproject.toml" ]; then
+      echo "Found pyproject.toml, injecting [tool.uv] configuration..."
+      inject_uv_into_pyproject "pyproject.toml"
+  fi
 
-	# Inject [tool.uv] config to enable offline wheel usage
-	if [ -f "pyproject.toml" ]; then
-		echo "Found pyproject.toml, injecting [tool.uv] configuration..."
-		inject_uv_into_pyproject "pyproject.toml"
-	fi
+  if [ -f "pyproject.toml" ] && [ ! -f "requirements.txt" ]; then
+      if command -v uv &> /dev/null; then
+          echo "Generating uv.lock file..."
+          uv lock ${UV_PLATFORM:+--python-platform ${UV_PLATFORM}} \
+          --python-version "${UV_PY_VERSION}" ${UV_PRERELEASE_FLAG}
+          if [[ $? -ne 0 ]]; then
+              echo "✗ Error: uv lock failed"
+              exit 1
+          fi
+          echo "✓ uv.lock generated successfully"
+          echo "Exporting requirements.txt from uv.lock..."
+          uv export --format requirements-txt -o requirements.txt \
+          ${UV_PLATFORM:+--python-platform ${UV_PLATFORM}} \
+          --python-version "${UV_PY_VERSION}" ${UV_PRERELEASE_FLAG}
+          if [[ $? -ne 0 ]]; then
+              echo "✗ Error: uv export failed"
+              exit 1
+          fi
+          echo "✓ requirements.txt generated successfully"
+      else
+          echo "✗ Error: pyproject.toml found but uv is not installed"
+          echo " Please install uv: pip install uv"
+          echo " Or commit requirements.txt with the plugin"
+          exit 1
+      fi
+  elif [ -f "requirements.txt" ]; then
+      echo "✓ Using existing requirements.txt"
+  fi
 
-	if [ -f "pyproject.toml" ] && [ ! -f "requirements.txt" ]; then
-		if command -v uv &> /dev/null; then
-			echo "Generating uv.lock file..."
-			uv lock ${UV_PLATFORM:+--python-platform ${UV_PLATFORM}} \
-				--python-version "${UV_PY_VERSION}" ${UV_PRERELEASE_FLAG}
-			if [[ $? -ne 0 ]]; then
-				echo "✗ Error: uv lock failed"
-				exit 1
-			fi
-			echo "✓ uv.lock generated successfully"
+  [ ! -f "requirements.txt" ] && echo "✗ Error: requirements.txt not found" && exit 1
 
-			echo "Exporting requirements.txt from uv.lock..."
-			uv export --format requirements-txt -o requirements.txt \
-				${UV_PLATFORM:+--python-platform ${UV_PLATFORM}} \
-				--python-version "${UV_PY_VERSION}" ${UV_PRERELEASE_FLAG}
-			if [[ $? -ne 0 ]]; then
-				echo "✗ Error: uv export failed"
-				exit 1
-			fi
-			echo "✓ requirements.txt generated successfully"
-		else
-			echo "✗ Error: pyproject.toml found but uv is not installed"
-			echo "  Please install uv: pip install uv"
-			echo "  Or commit requirements.txt with the plugin"
-			exit 1
-		fi
-	elif [ -f "requirements.txt" ]; then
-		echo "✓ Using existing requirements.txt"
-	fi
-
-	[ ! -f "requirements.txt" ] && echo "✗ Error: requirements.txt not found" && exit 1
   # ============================================================
   # 关键新增：解析出包含所有传递依赖的完整列表
   # ============================================================
   REQ_FILE="requirements.txt"
   if command -v uv &> /dev/null; then
-      echo "Resolving all transitive dependencies (e.g. werkzeug)..."
+      echo "Resolving all transitive dependencies (e.g. tqdm, werkzeug)..."
       # 使用 uv pip compile 将简写的 requirements.txt 解析为包含所有间接依赖的完整列表
       uv pip compile requirements.txt -o _full_requirements.txt \
-          ${UV_PLATFORM:+--python-platform${UV_PLATFORM}} \
-          --python-version "${UV_PY_VERSION}"${UV_PRERELEASE_FLAG} 2>/dev/null || cp requirements.txt _full_requirements.txt
+          ${UV_PLATFORM:+--python-platform ${UV_PLATFORM}} \
+          --python-version "${UV_PY_VERSION}" ${UV_PRERELEASE_FLAG} 2>/dev/null || cp requirements.txt _full_requirements.txt
       
       # 如果生成成功且非空，则使用它
       if [ -s "_full_requirements.txt" ]; then
           REQ_FILE="_full_requirements.txt"
           echo "✓ Full requirements resolved: $REQ_FILE"
+          # 显示传递依赖示例
+          echo "  Sample transitive dependencies:"
+          grep -E "^(tqdm|werkzeug|colorama)" "$REQ_FILE" | head -3 | sed 's/^/    - /'
       else
           echo "⚠ Failed to resolve full requirements, falling back to original."
       fi
   fi
-  # ============================================
+
+    # ============================================
   # Step 3: Download Python dependencies as wheels
   # ============================================
   echo ""
@@ -357,7 +361,7 @@ PY
   echo "Phase 1: Batch download with platform constraints..."
   if [ -n "$PIP_PLATFORM" ]; then
       BATCH_OK=0
-      ${PIP_CMD} download${PIP_PLATFORM} --only-binary=:all: --prefer-binary \
+      ${PIP_CMD} download ${PIP_PLATFORM} --only-binary=:all: --prefer-binary \
           -r "$REQ_FILE" -d ./wheels \
           --index-url ${PIP_MIRROR_URL} --trusted-host mirrors.aliyun.com 2>&1 && BATCH_OK=1
 
@@ -365,7 +369,7 @@ PY
           echo ""
           echo "⚠ Phase 1 failed, switching to per-package download..."
 
-          # ---- 阶段 2: 逐个下载 (处理纯 Python 包如 odfpy) ----
+          # ---- 阶段 2: 逐个下载 (处理纯 Python 包如 odfpy, tqdm) ----
           echo "Phase 2: Per-package download with fallback..."
           FAILED_PKGS=""
           SUCCESS_COUNT=0
@@ -380,7 +384,7 @@ PY
               echo "  → ${line}"
 
               # 尝试 1: 带平台约束 (要求 wheel)
-              if ${PIP_CMD} download${PIP_PLATFORM} --only-binary=:all: --no-deps \
+              if ${PIP_CMD} download ${PIP_PLATFORM} --only-binary=:all: --no-deps \
                   --prefer-binary "$line" -d ./wheels \
                   --index-url ${PIP_MIRROR_URL} --trusted-host mirrors.aliyun.com 2>/dev/null; then
                   echo "    ✅ wheel (platform-matched)"
@@ -392,12 +396,12 @@ PY
                   FALLBACK_COUNT=$((FALLBACK_COUNT + 1))
               else
                   echo "    ❌ FAILED"
-                  FAILED_PKGS="${FAILED_PKGS}\n    -${line}"
+                  FAILED_PKGS="${FAILED_PKGS}\n    - ${line}"
               fi
           done < "$REQ_FILE"
 
           echo ""
-          echo "  Phase 2 summary: ${SUCCESS_COUNT} wheels,${FALLBACK_COUNT} sdist fallbacks"
+          echo "  Phase 2 summary: ${SUCCESS_COUNT} wheels, ${FALLBACK_COUNT} sdist fallbacks"
 
           if [ -n "$FAILED_PKGS" ]; then
               echo ""
@@ -419,8 +423,32 @@ PY
   # Count downloaded packages
   WHEEL_COUNT=$(ls -1 ./wheels/*.whl 2>/dev/null | wc -l)
   SDIST_COUNT=$(ls -1 ./wheels/*.tar.gz ./wheels/*.zip 2>/dev/null | wc -l)
-  echo "✓ Downloaded $WHEEL_COUNT wheel packages,$SDIST_COUNT source packages"
-
+  echo "✓ Downloaded $WHEEL_COUNT wheel packages, $SDIST_COUNT source packages"
+  # ============================================
+  # Step 3.1: Verify downloaded dependencies
+  # ============================================
+  echo ""
+  echo "=========================================="
+  echo "Step 3.1: Verifying downloaded dependencies"
+  echo "=========================================="
+  if [ -f "$REQ_FILE" ] && command -v uv &> /dev/null; then
+      echo "Verifying dependencies with uv..."
+      # 使用 uv pip install --dry-run 检查是否所有依赖都能在本地找到
+      if ! uv pip install --no-index --find-links ./wheels -r "$REQ_FILE" --dry-run 2>uv_verify_error.log; then
+          echo "✗ Error: Some dependencies are missing in the local wheels directory."
+          echo "Error details:"
+          cat uv_verify_error.log
+          # 从错误信息中提取缺失的包名
+          echo ""
+          echo "Missing packages:"
+          grep -oP 'package "([^"]+)" not found' uv_verify_error.log | awk -F\" '{print $2}' | sort -u
+          exit 1
+      else
+          echo "✓ All dependencies are available locally."
+      fi
+  else
+      echo "⚠ uv not found, skipping verification. Please ensure all dependencies are downloaded."
+  fi
 
 	# ============================================
 	# Step 4: Update requirements.txt for offline usage

@@ -291,20 +291,21 @@ find-links = ["./wheels"]
 prerelease = "allow"
 
 # Important for ARM64 offline packages:
-# Limit uv resolution to Linux ARM64 only.
-# Otherwise uv may try to resolve Windows/macOS conditional dependencies,
-# such as gevent -> cffi on win32, and fail because only Linux ARM64 wheels exist.
+# Limit uv resolution to Linux ARM64 + Python 3.12 only.
+# Must include python_version constraint, otherwise uv will try to
+# resolve for ALL Python versions on linux/aarch64, and packages like
+# numpy (requires-python >=3.12) will be rejected.
 environments = [
-    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64' and python_version >= '3.12'",
 ]
-required-environments = [
-    "sys_platform == 'linux' and platform_machine == 'aarch64'",
-]
+# Do NOT use required-environments - it is too strict and causes
+# resolution failures for packages with python_full_version markers.
 
 [tool.uv.pip]
 no-index = true
 find-links = ["./wheels"]
 """
+
 
 content = "\n".join(out).rstrip() + "\n\n" + append.strip() + "\n"
 p.write_text(content, encoding="utf-8")

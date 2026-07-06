@@ -567,15 +567,61 @@ grep -n "jiter" requirements.txt || true
 # 新增：手动预处理纯 Python 依赖
 # ==========================================
 echo "Pre-downloading pure-python packages that often fail cross-platform resolution..."
-# 将所有可能导致 "from versions: none" 的纯 Python 包写在这里
-PURE_PY_PACKAGES=("odfpy>=1.4.1" "et-xmlfile" "tabulate" "pyxlsb")
 
-for pkg in "${PURE_PY_PACKAGES[@]}"; do
-    echo "  -> Pre-downloading $pkg (no platform restrictions)..."
-    # 使用 --no-deps 确保只下载这个包本身，不解析它的依赖树
-    ${PIP_CMD} download --no-deps \
-        "$pkg" \
-        -d ./wheels \
+# 1. 先尝试直接下载 odfpy 的 wheel 包（不带平台参数）
+echo "  -> Attempting to download odfpy wheel directly..."
+${PIP_CMD} download odfpy==1.4.1 --no-deps -d ./wheels \
+    --index-url "${PIP_MIRROR_URL}" \
+    --trusted-host mirrors.aliyun.com \
+    --trusted-host pypi.org \
+    --trusted-host files.pythonhosted.org
+
+# 2. 如果下载的是源码包，尝试构建 wheel
+if ! ls ./wheels/odfpy-*.whl 1> /dev/null 2>&1; then
+    echo "  -> Only source package available, building wheel from source..."
+    
+    # 创建临时目录构建 wheel
+    mkdir -p ./tmp_odfpy
+    cd ./tmp_odfpy
+    
+    # 下载源码包
+    ${PIP_CMD} download odfpy==1.4.1 --no-binary=:all: --no-deps -d . \
+        --index-url "${PIP_MIRROR_URL}" \
+        --trusted-host mirrors.aliyun.com \
+        --trusted-host pypi.org \
+        --trusted-host files.pythonhosted.org
+    
+    # 解压并构建 wheel
+    if ls odfpy-1.4.1.tar.gz 1> /dev/null 2>&1; then
+        tar -xzf odfpy-1.4.1.tar.gz
+        cd odfpy-1.4.1
+        python setup.py bdist_wheel
+        cp dist/odfpy-*.whl ../../wheels/
+        cd ../..
+        rm -rf ./tmp_odfpy
+        echo "  -> Successfully built odfpy wheel from source"
+    else
+        echo "  -> Failed to download odfpy source package"
+        cd ..
+        rm -rf ./tmp_odfpy
+    fi
+fi
+
+# 3. 检查是否成功获取 odfpy wheel
+if ! ls ./wheels/odfpy-*.whl 1> /dev/null 2>&1; then
+    echo "  -> Warning: Could not obtain odfpy wheel, will try alternative methods..."
+    
+    # 尝试从 GitHub 或其他可信来源下载预构建的 wheel
+    echo "  -> Downloading pre-built odfpy wheel from alternative source..."
+    curl -fL -o ./wheels/odfpy-1.4.1-py2.py3-none-any.whl \
+        "https://github.com/odfpy/odfpy/releases/download/v1.4.1/odfpy-1.4.1-py2.py3-none-any.whl" \
+        || echo "  -> Failed to download from alternative source"
+fi
+
+# 4. 其他纯 Python 包同样处理
+for pkg in et-xmlfile tabulate pyxlsb; do
+    echo "  -> Pre-downloading $pkg..."
+    ${PIP_CMD} download "$pkg" --no-deps -d ./wheels \
         --index-url "${PIP_MIRROR_URL}" \
         --trusted-host mirrors.aliyun.com \
         --trusted-host pypi.org \
@@ -593,6 +639,7 @@ ${PIP_CMD} download ${PIP_PLATFORM} \
     --trusted-host mirrors.aliyun.com \
     --trusted-host pypi.org \
     --trusted-host files.pythonhosted.org
+
 
 
     if [[ $? -ne 0 ]]; then
